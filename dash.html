@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runjob — job dashboard</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --border:#262b36; --text:#e6e8ee; --dim:#8b93a3;
+    --running:#f5a623; --done:#3ecf8e; --limited:#f5c542; --failed:#ff5c5c; --queued:#6c7385;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { color-scheme:light; --bg:#f6f7f9; --panel:#fff; --border:#e2e5ea;
+      --text:#1c1f26; --dim:#6b7280; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; align-items:baseline; gap:14px; padding:16px 22px;
+    border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:2; }
+  h1 { font-size:16px; margin:0; font-weight:650; letter-spacing:.2px; }
+  .meta { color:var(--dim); font-size:12px; }
+  .counts { margin-left:auto; display:flex; gap:14px; font-size:12px; }
+  .counts b { font-variant-numeric:tabular-nums; }
+  main { padding:16px 22px; max-width:1200px; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.6px;
+    color:var(--dim); font-weight:600; padding:6px 10px; border-bottom:1px solid var(--border); }
+  td { padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  tr:hover td { background:var(--panel); }
+  .job-row { cursor:pointer; }
+  .job-row:focus { outline:2px solid var(--running); outline-offset:-2px; }
+  .job-row[aria-expanded="true"] td { background:var(--panel); border-bottom-color:transparent; }
+  .chev { color:var(--dim); display:inline-block; font-size:10px; margin-right:6px;
+    transition:transform .15s ease; vertical-align:1px; }
+  .job-row[aria-expanded="true"] .chev { transform:rotate(90deg); }
+  .detail-row.is-hidden { display:none; }
+  .detail-row:hover td { background:transparent; }
+  .detail-cell { padding:0 10px 14px 32px; }
+  .detail-panel { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    overflow:hidden; }
+  .detail-summary { padding:11px 14px; border-bottom:1px solid var(--border); }
+  .detail-title { font-size:13px; margin-bottom:6px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .detail-meta { color:var(--dim); display:flex; flex-wrap:wrap; gap:5px 16px; font-size:11px; }
+  .detail-meta b { color:var(--text); font-weight:500; }
+  .detail-meta .wide { flex-basis:100%; }
+  .log-head { align-items:center; color:var(--dim); display:flex; font-size:11px;
+    justify-content:space-between; padding:7px 12px; }
+  .log-output { background:#0a0c10; color:#d8dce6; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+    margin:0; max-height:360px; min-height:100px; overflow:auto; padding:12px 14px;
+    scrollbar-color:var(--border) transparent; tab-size:2; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .term-heading { color:#79c0ff; font-weight:650; }
+  .term-reasoning { color:#d2a8ff; }
+  .term-command { color:#a5d6ff; }
+  .term-success, .term-add { color:#7ee787; }
+  .term-failure, .term-del { color:#ff7b72; }
+  .term-warning, .term-diff { color:#e3b341; }
+  .term-meta { color:#8b949e; }
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:20px;
+    font-size:12px; font-weight:600; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .s-running { color:var(--running); } .s-running .dot { background:var(--running);
+    box-shadow:0 0 0 0 var(--running); animation:pulse 1.6s infinite; }
+  .s-done, .s-exited { color:var(--done); } .s-done .dot,.s-exited .dot { background:var(--done); }
+  .s-limited { color:var(--limited); } .s-limited .dot { background:var(--limited); }
+  .s-failed { color:var(--failed); } .s-failed .dot { background:var(--failed); }
+  .s-queued { color:var(--queued); } .s-queued .dot { background:var(--queued); }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(245,166,35,.5);} 70%{box-shadow:0 0 0 6px rgba(245,166,35,0);} 100%{box-shadow:0 0 0 0 rgba(245,166,35,0);} }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .eng { font-weight:600; }
+  .title { color:var(--dim); max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .proj { color:var(--dim); }
+  .empty { color:var(--dim); padding:40px; text-align:center; }
+  .live { width:7px; height:7px; border-radius:50%; background:var(--done); display:inline-block;
+    animation:pulse 2s infinite; }
+</style>
+</head>
+<body>
+<header>
+  <h1>runjob</h1>
+  <span class="meta">machine-wide job log · <span class="live"></span> <span id="ts">—</span></span>
+  <div class="counts" id="counts"></div>
+</header>
+<main>
+  <table>
+    <thead><tr>
+      <th>Status</th><th>Job</th><th>Project</th><th>Engine</th><th>Model</th>
+      <th>Effort</th><th>Title</th><th>Updated</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty" id="empty" hidden>No jobs logged yet. Launch one with <code>runjob run …</code></div>
+</main>
+<script>
+const ORDER = { running:0, limited:1, queued:2, done:3, exited:3, failed:4 };
+const expanded = new Set(), logCache = new Map(), scrollState = new Map();
+let currentJobs = [], refreshing = false;
+function esc(s){ return (s??"").toString().replace(/[&<>"']/g, c=>({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+}[c])); }
+function tclock(iso){ if(!iso) return "—"; try { return iso.slice(11,19); } catch { return iso; } }
+function nfmt(n){ return Number.isFinite(Number(n)) ? Number(n).toLocaleString() : "—"; }
+const BASIC_COLORS = [
+  "#000000","#cd3131","#0dbc79","#e5e510","#2472c8","#bc3fbc","#11a8cd","#e5e5e5",
+  "#666666","#f14c4c","#23d18b","#f5f543","#3b8eea","#d670d6","#29b8db","#ffffff"
+];
+function color256(n){
+  if(n<16) return BASIC_COLORS[n];
+  if(n<232){
+    const x=n-16, levels=[0,95,135,175,215,255];
+    return `rgb(${levels[Math.floor(x/36)]},${levels[Math.floor(x%36/6)]},${levels[x%6]})`;
+  }
+  const v=8+(n-232)*10; return `rgb(${v},${v},${v})`;
+}
+function applySgr(state, raw){
+  const codes = (raw||"0").replaceAll(":",";").split(";").map(x=>Number(x||0));
+  for(let i=0;i<codes.length;i++){
+    const c=codes[i];
+    if(c===0) Object.assign(state,{fg:"",bg:"",bold:false,dim:false,italic:false,underline:false,inverse:false});
+    else if(c===1) state.bold=true; else if(c===2) state.dim=true;
+    else if(c===3) state.italic=true; else if(c===4) state.underline=true; else if(c===7) state.inverse=true;
+    else if(c===22){ state.bold=false; state.dim=false; } else if(c===23) state.italic=false;
+    else if(c===24) state.underline=false; else if(c===27) state.inverse=false;
+    else if(c>=30&&c<=37) state.fg=BASIC_COLORS[c-30]; else if(c===39) state.fg="";
+    else if(c>=40&&c<=47) state.bg=BASIC_COLORS[c-40]; else if(c===49) state.bg="";
+    else if(c>=90&&c<=97) state.fg=BASIC_COLORS[8+c-90];
+    else if(c>=100&&c<=107) state.bg=BASIC_COLORS[8+c-100];
+    else if((c===38||c===48) && codes[i+1]===5 && Number.isFinite(codes[i+2])){
+      state[c===38?"fg":"bg"]=color256(Math.max(0,Math.min(255,codes[i+2]))); i+=2;
+    } else if((c===38||c===48) && codes[i+1]===2 && codes.slice(i+2,i+5).every(Number.isFinite)){
+      const rgb=codes.slice(i+2,i+5).map(x=>Math.max(0,Math.min(255,x)));
+      state[c===38?"fg":"bg"]=`rgb(${rgb.join(",")})`; i+=4;
+    }
+  }
+}
+function appendAnsiText(parent, text, state){
+  if(!text) return;
+  const span=document.createElement("span"), fg=state.inverse?state.bg:state.fg, bg=state.inverse?state.fg:state.bg;
+  if(fg) span.style.color=fg; if(bg) span.style.backgroundColor=bg;
+  if(state.bold) span.style.fontWeight="700"; if(state.dim) span.style.opacity=".68";
+  if(state.italic) span.style.fontStyle="italic"; if(state.underline) span.style.textDecoration="underline";
+  span.textContent=text; parent.append(span);
+}
+function renderAnsi(parent, text){
+  const clean=text.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "");
+  const state={fg:"",bg:"",bold:false,dim:false,italic:false,underline:false,inverse:false};
+  const re=/\x1b\[([0-?]*)([ -/]*)([@-~])/g;
+  let last=0, match;
+  while((match=re.exec(clean))){
+    appendAnsiText(parent, clean.slice(last,match.index), state);
+    if(match[3]==="m") applySgr(state,match[1]);
+    last=re.lastIndex;
+  }
+  appendAnsiText(parent,clean.slice(last),state);
+}
+function plainLineClass(line){
+  if(/^(codex|assistant|claude|grok)\s*$/i.test(line)) return "term-heading";
+  if(/^(analysis|reasoning)\s*$/i.test(line)) return "term-reasoning";
+  if(/^(exec|tool|function)(\s|$)/i.test(line)) return "term-command";
+  if(/(^|\s)(succeeded|passed|complete|done)(\s|$)/i.test(line)) return "term-success";
+  if(/(^|\s)(failed|error|traceback|exception)(\s|$)/i.test(line)) return "term-failure";
+  if(/(^|\s)(warning|limited|retry)(\s|$)/i.test(line)) return "term-warning";
+  if(/^diff --git|^@@|^index [0-9a-f]/.test(line)) return "term-diff";
+  if(/^\+\+\+|^---/.test(line)) return "term-diff";
+  if(/^\+(?!\+\+)/.test(line)) return "term-add";
+  if(/^-(?!---)/.test(line)) return "term-del";
+  if(/^=====|^\s*(in|at) \/|^\s*\d{4}-\d\d-\d\dT/.test(line)) return "term-meta";
+  return "";
+}
+function renderTerminal(parent, text){
+  parent.replaceChildren();
+  text=(text??"").replace(/\r(?!\n)/g,"");
+  if(text.includes("\x1b[")){ renderAnsi(parent,text); return; }
+  const frag=document.createDocumentFragment(), lines=text.split("\n");
+  lines.forEach((line,i)=>{
+    const span=document.createElement("span"), cls=plainLineClass(line);
+    if(cls) span.className=cls;
+    span.textContent=line; frag.append(span);
+    if(i<lines.length-1) frag.append("\n");
+  });
+  parent.append(frag);
+}
+function captureScroll(){
+  document.querySelectorAll(".log-output").forEach(el=>{
+    const gap = el.scrollHeight-el.scrollTop-el.clientHeight;
+    scrollState.set(el.dataset.logFor, {top:el.scrollTop, pinned:gap<28});
+  });
+}
+function renderRows(jobs){
+  captureScroll();
+  const rows = document.getElementById("rows"), empty = document.getElementById("empty");
+  empty.hidden = jobs.length>0;
+  rows.innerHTML = jobs.map(j=>{
+    const st = j.status||"?", open = expanded.has(j.uid), cached = logCache.get(j.uid);
+    const u = j.usage && typeof j.usage === "object" ? j.usage : null;
+    const tokenText = u ? `${nfmt(u.total_tokens)} total · ${nfmt(u.input_tokens)} in · ${nfmt(u.output_tokens)} out · ${nfmt(u.thinking_tokens)} thinking · ${nfmt(u.cache_read_tokens)} cache` : "";
+    const meta = [
+      j.branch ? `branch <b class="mono">${esc(j.branch)}</b>` : "",
+      j.cwd ? `cwd <b class="mono">${esc(j.cwd)}</b>` : "",
+      j.pid ? `pid <b class="mono">${esc(j.pid)}</b>` : "",
+      j.created ? `started <b class="mono">${esc(j.created)}</b>` : "",
+      j.outcome_status ? `provider status <b>${esc(j.outcome_status)}</b>` : "",
+      j.duration_seconds!=null ? `duration <b>${esc(j.duration_seconds)}s</b>` : "",
+      j.num_turns!=null ? `turns <b>${esc(j.num_turns)}</b>` : "",
+      tokenText ? `tokens <b class="mono">${esc(tokenText)}</b>` : ""
+    ].filter(Boolean).map(x=>`<span>${x}</span>`).join("")
+      + (j.summary ? `<span class="wide">outcome <b>${esc(j.summary)}</b></span>` : "");
+    return `<tr class="job-row" data-uid="${esc(j.uid)}" tabindex="0" role="button" aria-expanded="${open}">
+      <td><span class="chev" aria-hidden="true">▶</span><span class="pill s-${esc(st)}"><span class="dot"></span>${esc(st)}</span></td>
+      <td class="mono">${esc(j.uid)}</td>
+      <td class="proj">${esc(j.project_name||"—")}</td>
+      <td class="eng">${esc(j.engine||"—")}</td>
+      <td class="mono">${esc(j.model||"—")}</td>
+      <td class="mono">${esc(j.effort||"—")}</td>
+      <td class="title" title="${esc(j.title||j.summary||"")}">${esc(j.title||j.summary||"—")}</td>
+      <td class="mono">${tclock(j.updated)}</td>
+    </tr>
+    <tr class="detail-row${open ? "" : " is-hidden"}" aria-hidden="${!open}">
+      <td class="detail-cell" colspan="8"><div class="detail-panel">
+        <div class="detail-summary">
+          <div class="detail-title">${esc(j.title||j.summary||"No task description recorded.")}</div>
+          <div class="detail-meta">${meta}</div>
+        </div>
+        <div class="log-head"><span>Session log · latest 100 KB</span><span data-log-meta-for="${esc(j.uid)}">${cached?.truncated ? "tail truncated · " : ""}${cached?.ts ? `updated ${tclock(cached.ts)}` : ""}</span></div>
+        <pre class="log-output" data-log-for="${esc(j.uid)}" tabindex="0"></pre>
+      </div></td>
+    </tr>`;
+  }).join("");
+  for(const uid of expanded){
+    const el = document.querySelector(`[data-log-for="${CSS.escape(uid)}"]`);
+    if(!el) continue;
+    const cached=logCache.get(uid);
+    renderTerminal(el,cached ? (cached.available ? cached.text : (cached.error ? `Log unavailable: ${cached.error}` : "No log output yet.")) : "Loading session log…");
+    const state = scrollState.get(uid) || {top:0, pinned:true};
+    el.scrollTop = state.pinned ? el.scrollHeight : state.top;
+  }
+}
+async function loadLog(uid){
+  try {
+    const data = await (await fetch(`/api/jobs/${encodeURIComponent(uid)}/log`)).json();
+    logCache.set(uid, data);
+    if(!expanded.has(uid)) return;
+    const el = document.querySelector(`[data-log-for="${CSS.escape(uid)}"]`);
+    if(!el) return;
+    const state = scrollState.get(uid) || {top:0, pinned:true};
+    renderTerminal(el,data.available ? data.text : (data.error ? `Log unavailable: ${data.error}` : "No log output yet."));
+    el.scrollTop = state.pinned ? el.scrollHeight : state.top;
+    scrollState.set(uid, {top:el.scrollTop, pinned:state.pinned});
+    const meta = document.querySelector(`[data-log-meta-for="${CSS.escape(uid)}"]`);
+    if(meta) meta.textContent = `${data.truncated ? "tail truncated · " : ""}updated ${tclock(data.ts)}`;
+  } catch(e) {
+    const el = document.querySelector(`[data-log-for="${CSS.escape(uid)}"]`);
+    if(el) renderTerminal(el,"Could not load session log.");
+  }
+}
+function toggle(uid){
+  if(expanded.has(uid)) expanded.delete(uid); else expanded.add(uid);
+  renderRows(currentJobs);
+  if(expanded.has(uid)) loadLog(uid);
+}
+async function refresh(){
+  if(refreshing) return;
+  refreshing = true;
+  let data;
+  try { data = await (await fetch("/api/jobs")).json(); }
+  catch { document.getElementById("ts").textContent = "disconnected"; refreshing=false; return; }
+  document.getElementById("ts").textContent = tclock(data.ts);
+  const jobs = (data.jobs||[]).slice().sort((a,b)=>
+    (ORDER[a.status]??9)-(ORDER[b.status]??9) || (b.updated||"").localeCompare(a.updated||""));
+  currentJobs = jobs;
+  const c = {};
+  for (const j of jobs) c[j.status] = (c[j.status]||0)+1;
+  document.getElementById("counts").innerHTML = ["running","limited","queued","done","failed"]
+    .filter(k=>c[k]).map(k=>`<span class="s-${k}"><b>${c[k]}</b> ${k}</span>`).join("");
+  renderRows(jobs);
+  await Promise.all([...expanded].map(loadLog));
+  refreshing = false;
+}
+const rows = document.getElementById("rows");
+rows.addEventListener("click", e=>{
+  const row = e.target.closest(".job-row");
+  if(row) toggle(row.dataset.uid);
+});
+rows.addEventListener("keydown", e=>{
+  const row = e.target.closest(".job-row");
+  if(row && (e.key==="Enter" || e.key===" ")){ e.preventDefault(); toggle(row.dataset.uid); }
+});
+rows.addEventListener("scroll", e=>{
+  if(!e.target.matches?.(".log-output")) return;
+  const el = e.target, gap = el.scrollHeight-el.scrollTop-el.clientHeight;
+  scrollState.set(el.dataset.logFor, {top:el.scrollTop, pinned:gap<28});
+}, true);
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

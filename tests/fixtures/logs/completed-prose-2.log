@@ -1,0 +1,4 @@
+===== 2026-08-03T16:05:03+10:00 launch claude
+The regression was caused by matching rate limit prose before checking the clean
+wrapper exit. Tests pass.
+===== exit:0

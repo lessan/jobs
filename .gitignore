@@ -1,0 +1,5 @@
+# Never commit secrets or local runtime state.
+secrets.env
+*.local
+__pycache__/
+*.pyc

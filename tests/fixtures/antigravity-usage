@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+import json
+import os
+
+
+exhausted = os.environ.get("AGY_FIXTURE_EXHAUSTED") == "1"
+print(json.dumps({
+    "method": "fixture",
+    "models": [{
+        "modelId": "gemini-3.6-flash-high",
+        "remainingPercentage": 0 if exhausted else 0.42,
+        "isExhausted": exhausted,
+        "resetTime": "2026-08-09T00:00:00Z",
+        "isAutocompleteOnly": False,
+    }],
+}))

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jobs"
+  short_description: "Launch and monitor off-session LLM jobs"
+  default_prompt: "Use $jobs to hand this task to an off-session model and track its result."

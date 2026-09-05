@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+import json
+import sys
+
+
+required = {
+    "--output-format": "json",
+    "--print-timeout": "45m",
+}
+for flag, value in required.items():
+    if flag not in sys.argv or sys.argv[sys.argv.index(flag) + 1] != value:
+        print(f"missing {flag} {value}", file=sys.stderr)
+        sys.exit(2)
+if "--dangerously-skip-permissions" not in sys.argv or "-p" not in sys.argv:
+    print("missing required permission or prompt flag", file=sys.stderr)
+    sys.exit(2)
+
+prompt = sys.argv[sys.argv.index("-p") + 1]
+print(json.dumps({
+    "conversation_id": "fixture-conversation",
+    "status": "SUCCESS",
+    "response": f"fixture completed: {prompt}",
+    "duration_seconds": 1.25,
+    "num_turns": 1,
+    "usage": {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "thinking_tokens": 5,
+        "cache_read_tokens": 10,
+        "total_tokens": 135,
+    },
+}))

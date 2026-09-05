@@ -1,0 +1,51 @@
+# .dev-jobs.toml — per-project fleet config.
+# Copy to a project root as `.dev-jobs.toml` to override the defaults below.
+# Only needed for `runjob fleet`; one-shot `runjob run` ignores most of this.
+#
+# TOML NOTE: all bare top-level keys MUST come before the first [table] header,
+# else they get nested under that table. Keep [caps] and [usage_gate.*] LAST.
+
+# Branch created per job: "<branch_prefix>/<job-id>".
+branch_prefix = "job"
+
+# Directory holding jobs/*.md and worktrees, relative to project root.
+jobs_dir      = "jobs"
+worktrees_dir = ".worktrees"
+
+# Fleet job transcripts. Omit/empty = "<jobs_dir>/logs". Point it at a path the
+# project already gitignores (e.g. an existing "<tool>/orchestrate/logs").
+# logs_dir    = ""
+
+# External-provider engines that get a sparse-checkout–sanitized worktree so
+# private content never enters their context. Empty `sanitize_excludes` = no-op.
+sanitize_engines  = ["codex", "grok", "glm", "agy"]
+
+# Paths (leading "/" = repo-root-anchored) kept OUT of sanitized worktrees.
+# Example: ["/private/", "/customer-data/", "/secrets/"]
+sanitize_excludes = []
+
+# --- tables must come after all bare keys above ---
+
+# How many concurrent jobs per engine the fleet scheduler will run.
+[caps]
+claude = 1
+codex  = 1
+grok   = 1
+glm    = 1
+agy    = 1
+local  = 1
+
+# Optional live quota gates: the fleet defers launching a job when a stack is
+# near its subscription wall. Each engine runs a shell `cmd` (cwd = project root)
+# and is gated against its stdout. Three styles (mix as needed); fails OPEN.
+#   thresholds {name = pct}  — %USED: defer if the cmd prints `name:pct%` >= pct
+#   max = pct                — %USED: defer if the max bare `pct%` >= pct
+#   min_left = pct           — %LEFT: defer if the min `pct% left` <= pct
+#
+# [usage_gate.claude]
+# cmd = "python3 scripts/quota/claude_usage.py --compact"   # prints session:16% weekly:64%
+# thresholds = { session = 60 }
+#
+# [usage_gate.codex]
+# cmd = "python3 scripts/quota/codex_usage.py --compact"    # prints 5h:98%left weekly:69%left
+# min_left = 8
